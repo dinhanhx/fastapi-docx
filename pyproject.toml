@@ -1,0 +1,29 @@
+[project]
+name = "fastapi-docx"
+version = "0.0.1"
+description = "A fastapi docx service to do stuff"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "python-multipart",
+    "fastapi[standard]",
+    "uvicorn[standard]",
+    "aiofiles",
+    "pywin32"
+]
+
+[tool.ruff]
+line-length = 120
+# Flake8 - E, F
+# pycodestyle - W
+# flake8-builtins - A
+# Pylint - PLC, PLE, PLW
+# isort - I
+select = ['E', 'F', 'W', 'A', 'PLC', 'PLE', 'PLW', 'I']
+
+[tool.ruff.format]
+# Like Black
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
