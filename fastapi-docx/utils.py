@@ -10,8 +10,8 @@ from starlette.background import BackgroundTask
 TEMP_DIR = Path(tempfile.gettempdir()) / "doc_converter"
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
-# Maximum accepted file size (default 50 MB).
-MAX_UPLOAD_BYTES: int = int(os.getenv("MAX_UPLOAD_BYTES", 50 * 1024 * 1024))
+# Maximum accepted file size (default 5 MB).
+MAX_UPLOAD_BYTES: int = int(os.getenv("MAX_UPLOAD_BYTES", 5 * 1024 * 1024))
 
 
 def validate_file_extension(filename: str | None, allowed: list[str]) -> None:
