@@ -40,6 +40,7 @@ def convert(input_path: Path, output_path: Path, wd_format: int, visible: bool =
     try:
         doc = word.Documents.Open(str(input_path.resolve()))
         try:
+            doc.WebOptions.Encoding = 65001
             doc.SaveAs(str(output_path.resolve()), FileFormat=wd_format)
         finally:
             doc.Close(0)
