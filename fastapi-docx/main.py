@@ -36,6 +36,7 @@ def health_check():
     summary="Convert .doc → .docx",
     response_description="The converted .docx file as a binary download.",
 )
+@app.post("/convert", tags=["Legacy"])
 async def convert_doc_to_docx(file: UploadFile = File(..., description="A .doc file to convert.")):
 
     validate_file_extension(file.filename, allowed=[".doc"])
@@ -65,6 +66,7 @@ async def convert_doc_to_docx(file: UploadFile = File(..., description="A .doc f
     summary="Convert .docx → .pdf",
     response_description="The converted .pdf file as a binary download.",
 )
+@app.post("/docx2pdf", tags=["Legacy"])
 async def convert_docx_to_pdf(file: UploadFile = File(..., description="A .docx file to convert.")):
 
     validate_file_extension(file.filename, allowed=[".docx"])
