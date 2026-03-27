@@ -5,7 +5,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from .converters import doc_to_docx, docx_to_html, docx_to_pdf, lifespan
+from .converters import doc_to_docx, docx_to_html, docx_to_html_zip, docx_to_pdf, lifespan
 from .utils import cleanup, get_output_path, save_upload, validate_file_extension
 
 app = FastAPI(
@@ -119,10 +119,41 @@ async def convert_docx_to_html(file: UploadFile = File(..., description="A .docx
     )
 
 
+@app.post(
+    "/convert/docx-to-html-zip",
+    tags=["Conversions"],
+    summary="Convert .docx → .html (with assets as ZIP)",
+    response_description="A ZIP file containing the .html file and its assets folder.",
+)
+async def convert_docx_to_html_zip(file: UploadFile = File(..., description="A .docx file to convert.")):
+
+    validate_file_extension(file.filename, allowed=[".docx"])
+
+    input_path = await save_upload(file)
+    output_path = get_output_path(input_path, ".zip")
+    base_name = Path(file.filename).stem
+    download_name = base_name + ".zip"
+
+    try:
+        docx_to_html_zip(input_path, output_path, base_name)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Conversion failed: {exc}") from exc
+    finally:
+        cleanup(input_path)
+
+    return FileResponse(
+        path=output_path,
+        media_type="application/zip",
+        filename=download_name,
+        background=cleanup(output_path),
+    )
+
+
 if __name__ == "__main__":
     uvicorn.run(
         "fastapi-docx.main:app",
         host="0.0.0.0",
         port=9700,
         workers=16,
+        # reload=True,
     )
