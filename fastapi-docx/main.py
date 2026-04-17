@@ -5,6 +5,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
+from .config import PORT, RELOAD, WORKERS
 from .converters import doc_to_docx, docx_to_html, docx_to_html_zip, docx_to_pdf, lifespan
 from .utils import cleanup, get_output_path, save_upload, validate_file_extension
 
@@ -153,7 +154,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "fastapi-docx.main:app",
         host="0.0.0.0",
-        port=9700,
-        workers=16,
-        # reload=True,
+        port=PORT,
+        workers=WORKERS,
+        reload=RELOAD,
     )

@@ -9,7 +9,8 @@ dependencies = [
     "fastapi[standard]",
     "uvicorn[standard]",
     "aiofiles",
-    "pywin32"
+    "pywin32",
+    "python-dotenv"
 ]
 
 [tool.ruff]

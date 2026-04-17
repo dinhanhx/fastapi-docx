@@ -1,4 +1,3 @@
-import os
 import tempfile
 import uuid
 from pathlib import Path
@@ -6,12 +5,11 @@ from pathlib import Path
 from fastapi import HTTPException, UploadFile
 from starlette.background import BackgroundTask
 
+from .config import MAX_UPLOAD_BYTES
+
 # Where uploaded files and conversion outputs are stored temporarily.
 TEMP_DIR = Path(tempfile.gettempdir()) / "doc_converter"
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
-
-# Maximum accepted file size (default 5 MB).
-MAX_UPLOAD_BYTES: int = int(os.getenv("MAX_UPLOAD_BYTES", 5 * 1024 * 1024))
 
 
 def validate_file_extension(filename: str | None, allowed: list[str]) -> None:
