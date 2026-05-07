@@ -35,22 +35,35 @@ async def save_upload(file: UploadFile) -> Path:
     Raises:
         HTTPException 413: If the file exceeds MAX_UPLOAD_BYTES.
     """
+    # Check Content-Length header if available
+    if file.size and file.size > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum size is {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
+        )
+
     suffix = Path(file.filename or "upload").suffix
     dest = TEMP_DIR / f"{uuid.uuid4().hex}{suffix}"
 
     total = 0
     chunk_size = 64 * 1024  # 64 KB
 
-    with dest.open("wb") as fh:
-        while chunk := await file.read(chunk_size):
-            total += len(chunk)
-            if total > MAX_UPLOAD_BYTES:
-                dest.unlink(missing_ok=True)
-                raise HTTPException(
-                    status_code=413,
-                    detail=f"File too large. Maximum size is {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
-                )
-            fh.write(chunk)
+    try:
+        with dest.open("wb") as fh:
+            while chunk := await file.read(chunk_size):
+                total += len(chunk)
+                if total > MAX_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File too large. Maximum size is {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
+                    )
+                fh.write(chunk)
+    except HTTPException:
+        dest.unlink(missing_ok=True)
+        raise
+    except Exception:
+        dest.unlink(missing_ok=True)
+        raise
 
     return dest
 
