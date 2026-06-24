@@ -73,6 +73,14 @@ def get_output_path(input_path: Path, new_suffix: str) -> Path:
     return input_path.with_suffix(new_suffix)
 
 
+def delete_file(path: Path) -> None:
+    """Delete a single file immediately, best-effort."""
+    try:
+        path.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
 def cleanup(*paths: Path) -> BackgroundTask:
     """
     Return a Starlette BackgroundTask that deletes all given paths after

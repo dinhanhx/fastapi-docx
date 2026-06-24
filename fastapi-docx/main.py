@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 
 from .config import PORT, RELOAD, WORKERS
 from .converters import doc_to_docx, docx_to_html, docx_to_html_zip, docx_to_pdf, lifespan
-from .utils import cleanup, get_output_path, save_upload, validate_file_extension
+from .utils import cleanup, delete_file, get_output_path, save_upload, validate_file_extension
 
 app = FastAPI(
     title="Document Conversion Service",
@@ -51,7 +51,7 @@ async def convert_doc_to_docx(file: UploadFile = File(..., description="A .doc f
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Conversion failed: {exc}") from exc
     finally:
-        cleanup(input_path)
+        delete_file(input_path)
 
     return FileResponse(
         path=output_path,
@@ -81,7 +81,7 @@ async def convert_docx_to_pdf(file: UploadFile = File(..., description="A .docx 
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Conversion failed: {exc}") from exc
     finally:
-        cleanup(input_path)
+        delete_file(input_path)
 
     return FileResponse(
         path=output_path,
@@ -110,7 +110,7 @@ async def convert_docx_to_html(file: UploadFile = File(..., description="A .docx
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Conversion failed: {exc}") from exc
     finally:
-        cleanup(input_path)
+        delete_file(input_path)
 
     return FileResponse(
         path=output_path,
@@ -140,7 +140,7 @@ async def convert_docx_to_html_zip(file: UploadFile = File(..., description="A .
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Conversion failed: {exc}") from exc
     finally:
-        cleanup(input_path)
+        delete_file(input_path)
 
     return FileResponse(
         path=output_path,
