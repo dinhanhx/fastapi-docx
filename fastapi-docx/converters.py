@@ -1,4 +1,5 @@
 import logging
+import os
 import queue
 import shutil
 import subprocess
@@ -130,18 +131,51 @@ def _kill_word() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Office cache cleanup
+# ---------------------------------------------------------------------------
+
+_OFFICE_CACHE_GLOBS = [
+    r"%LOCALAPPDATA%\Microsoft\Office\16.0\OfficeFileCache\*",
+    r"%LOCALAPPDATA%\Microsoft\Office\16.0\WebServiceCache\*",
+    r"%APPDATA%\Microsoft\Office\Recent\*",
+    r"%LOCALAPPDATA%\Temp\*.tmp",
+]
+
+
+def _cleanup_office_cache() -> None:
+    if sys.platform != "win32":
+        return
+    for pattern in _OFFICE_CACHE_GLOBS:
+        expanded = Path(os.path.expandvars(pattern))
+        parent = expanded.parent
+        glob = expanded.name
+        if not parent.exists():
+            continue
+        for item in parent.glob(glob):
+            try:
+                if item.is_dir():
+                    shutil.rmtree(item, ignore_errors=True)
+                else:
+                    item.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+
+# ---------------------------------------------------------------------------
 # Lifespan
 # ---------------------------------------------------------------------------
 
 
 @asynccontextmanager
 async def lifespan(*_):
+    _cleanup_office_cache()
     _start_worker()
     yield
     # Signal the COM worker to quit gracefully
     _work_queue.put(None)
     if _worker_thread:
         _worker_thread.join(timeout=10)
+    _cleanup_office_cache()
 
 
 # ---------------------------------------------------------------------------

@@ -1,3 +1,4 @@
+import shutil
 import tempfile
 import uuid
 from pathlib import Path
@@ -9,7 +10,9 @@ from .config import MAX_UPLOAD_BYTES
 
 # Where uploaded files and conversion outputs are stored temporarily.
 TEMP_DIR = Path(tempfile.gettempdir()) / "doc_converter"
-TEMP_DIR.mkdir(parents=True, exist_ok=True)
+if TEMP_DIR.exists():
+    shutil.rmtree(TEMP_DIR)
+TEMP_DIR.mkdir(parents=True)
 
 
 def validate_file_extension(filename: str | None, allowed: list[str]) -> None:
