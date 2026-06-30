@@ -53,8 +53,9 @@ def _com_worker() -> None:
 
     pythoncom.CoInitialize()
 
-    word = win32com.client.Dispatch("Word.Application")
+    word = win32com.client.DispatchEx("Word.Application")
     word.Visible = False
+    word.DisplayAlerts = 0  # wdAlertsNone — suppress all modal dialogs
 
     try:
         _, pid = win32process.GetWindowThreadProcessId(word.Hwnd)
