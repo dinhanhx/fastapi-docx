@@ -1,3 +1,4 @@
+import atexit
 import shutil
 import tempfile
 import uuid
@@ -8,11 +9,18 @@ from starlette.background import BackgroundTask
 
 from .config import MAX_UPLOAD_BYTES
 
-# Where uploaded files and conversion outputs are stored temporarily.
-TEMP_DIR = Path(tempfile.gettempdir()) / "doc_converter"
-if TEMP_DIR.exists():
-    shutil.rmtree(TEMP_DIR)
-TEMP_DIR.mkdir(parents=True)
+# Each worker gets its own directory.  This module is imported independently by
+# each worker process, and mkdtemp() guarantees that the directories do not
+# collide or remove files belonging to another worker.
+TEMP_DIR = Path(tempfile.mkdtemp(prefix="doc_converter-"))
+
+
+def _remove_temp_dir() -> None:
+    """Remove this worker's temporary directory when the process exits."""
+    shutil.rmtree(TEMP_DIR, ignore_errors=True)
+
+
+atexit.register(_remove_temp_dir)
 
 
 def validate_file_extension(filename: str | None, allowed: list[str]) -> None:
