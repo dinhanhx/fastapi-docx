@@ -4,7 +4,9 @@ import queue
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
+import time
 import zipfile
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -29,6 +31,12 @@ logger = logging.getLogger(__name__)
 _work_queue: queue.Queue = queue.Queue()
 _worker_thread: threading.Thread | None = None
 _word_pid: int | None = None  # PID of the Word.exe process, for forced kill on timeout
+
+
+def _is_rpc_unavailable(exc: BaseException) -> bool:
+    """Return whether pywin32 reports that the Word COM server disappeared."""
+    # 0x800706BA: The RPC server is unavailable.
+    return bool(getattr(exc, "args", ())) and getattr(exc, "args", ())[0] == -2147023174
 
 
 def _com_worker() -> None:
@@ -82,6 +90,7 @@ def _com_worker() -> None:
             if item is None:
                 break
             fn, evt, box = item
+            word_lost = False
             try:
                 logger.debug("Starting queued COM operation")
                 box[0] = fn(word)
@@ -89,8 +98,14 @@ def _com_worker() -> None:
             except Exception as exc:
                 box[0] = exc
                 logger.exception("Queued COM operation failed")
+                # A Word COM proxy cannot recover after Word.exe has exited.
+                # Stop this worker so the next request creates a fresh proxy.
+                word_lost = _is_rpc_unavailable(exc)
             finally:
                 evt.set()
+            if word_lost:
+                logger.warning("Word COM connection was lost; stopping worker for restart")
+                break
     finally:
         try:
             word.Quit()
@@ -117,23 +132,39 @@ def _run_on_com_thread(fn, timeout: float = CONVERSION_TIMEOUT):
     Raises TimeoutError on timeout (and attempts to kill Word).
     Re-raises any exception thrown inside fn.
     """
-    evt = threading.Event()
-    box: list = [None]
-    logger.debug("Queueing COM operation (timeout=%ss)", timeout)
-    _work_queue.put((fn, evt, box))
+    global _worker_thread
+    for attempt in range(2):
+        _start_worker()
+        evt = threading.Event()
+        box: list = [None]
+        logger.debug("Queueing COM operation (timeout=%ss, attempt=%s)", timeout, attempt + 1)
+        _work_queue.put((fn, evt, box))
 
-    finished = evt.wait(timeout=timeout)
-    if not finished:
-        logger.error("COM operation timed out after %ss; killing Word", timeout)
-        _kill_word()
-        raise TimeoutError(f"Conversion exceeded {timeout}s timeout — Word process killed.")
+        finished = evt.wait(timeout=timeout)
+        if not finished:
+            logger.error("COM operation timed out after %ss; killing Word", timeout)
+            _kill_word()
+            raise TimeoutError(f"Conversion exceeded {timeout}s timeout — Word process killed.")
 
-    result = box[0]
-    if isinstance(result, BaseException):
-        logger.error("COM operation raised %s", type(result).__name__)
-        raise result
-    logger.debug("COM operation returned successfully")
-    return result
+        result = box[0]
+        if isinstance(result, BaseException):
+            logger.error("COM operation raised %s", type(result).__name__)
+            if _is_rpc_unavailable(result) and attempt == 0:
+                # The worker exits after detecting a dead Word proxy. Wait for
+                # its COM cleanup before starting a replacement thread.
+                worker = _worker_thread
+                if worker is not None:
+                    worker.join(timeout=5)
+                if worker is not None and worker.is_alive():
+                    raise result
+                _worker_thread = None
+                logger.warning("Retrying operation with a new Word COM instance")
+                continue
+            raise result
+        logger.debug("COM operation returned successfully")
+        return result
+
+    raise RuntimeError("COM operation could not be completed")
 
 
 def _kill_word() -> None:
@@ -173,30 +204,108 @@ _OFFICE_CACHE_GLOBS = [
     r"%LOCALAPPDATA%\Temp\*.tmp",
 ]
 
+# ---------------------------------------------------------------------------
+# Cross-process "cleanup leader" lock
+#
+# When the app is run with multiple workers (e.g. multiple Uvicorn/Gunicorn
+# processes), each worker runs its own lifespan and would otherwise try to
+# clean up the same Office cache folders at the same time, racing each other.
+# Only one worker (whichever gets there first) should actually do the work;
+# the rest should skip it. We arbitrate this with an atomically-created lock
+# file: os.O_CREAT | os.O_EXCL is atomic across processes on both Windows and
+# POSIX, so exactly one process will win the race to create it.
+# ---------------------------------------------------------------------------
+
+_CLEANUP_LOCK_PATH = Path(tempfile.gettempdir()) / "fastapi_docx_office_cache_cleanup.lock"
+_CLEANUP_LOCK_STALE_SECONDS = 60
+
+
+def _try_become_cleanup_leader() -> bool:
+    """
+    Attempt to atomically claim the right to perform Office cache cleanup.
+    Returns True if this process/worker won the race and should perform the
+    cleanup, False if another worker already claimed it (or claimed it very
+    recently).
+    """
+    for attempt in range(2):
+        try:
+            fd = os.open(_CLEANUP_LOCK_PATH, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            try:
+                os.write(fd, str(os.getpid()).encode())
+            finally:
+                os.close(fd)
+            logger.debug("Became Office cache cleanup leader (pid=%s)", os.getpid())
+            return True
+        except FileExistsError:
+            if attempt == 0:
+                try:
+                    age = time.time() - _CLEANUP_LOCK_PATH.stat().st_mtime
+                except OSError:
+                    age = None
+                if age is not None and age > _CLEANUP_LOCK_STALE_SECONDS:
+                    logger.warning(
+                        "Cleanup lock file is stale (age=%.1fs); removing and retrying: %s",
+                        age,
+                        _CLEANUP_LOCK_PATH,
+                    )
+                    try:
+                        _CLEANUP_LOCK_PATH.unlink(missing_ok=True)
+                    except OSError:
+                        logger.exception("Failed to remove stale cleanup lock file")
+                        return False
+                    continue
+            logger.debug("Another worker already holds the Office cache cleanup lock")
+            return False
+        except OSError:
+            logger.exception("Unexpected error while acquiring cleanup lock")
+            return False
+    return False
+
+
+def _release_cleanup_leader() -> None:
+    try:
+        _CLEANUP_LOCK_PATH.unlink(missing_ok=True)
+        logger.debug("Released Office cache cleanup lock")
+    except OSError:
+        logger.exception("Failed to release Office cache cleanup lock: %s", _CLEANUP_LOCK_PATH)
+
 
 def _cleanup_office_cache() -> None:
     if sys.platform != "win32":
         logger.debug("Skipping Office cache cleanup on unsupported platform")
         return
-    logger.info("Cleaning Office cache files")
-    removed = 0
-    for pattern in _OFFICE_CACHE_GLOBS:
-        expanded = Path(os.path.expandvars(pattern))
-        parent = expanded.parent
-        glob = expanded.name
-        if not parent.exists():
-            logger.debug("Office cache directory does not exist: %s", parent)
-            continue
-        for item in parent.glob(glob):
+
+    if not _try_become_cleanup_leader():
+        logger.info("Skipping Office cache cleanup; another worker is already handling it")
+        return
+
+    try:
+        logger.info("Cleaning Office cache files")
+        removed = 0
+        for pattern in _OFFICE_CACHE_GLOBS:
+            expanded = Path(os.path.expandvars(pattern))
+            parent = expanded.parent
+            glob = expanded.name
+            if not parent.exists():
+                logger.debug("Office cache directory does not exist: %s", parent)
+                continue
             try:
-                if item.is_dir():
-                    shutil.rmtree(item, ignore_errors=True)
-                else:
-                    item.unlink(missing_ok=True)
-                removed += 1
-            except Exception:
-                logger.exception("Failed to remove Office cache item: %s", item)
-    logger.info("Office cache cleanup finished (items_removed=%s)", removed)
+                items = list(parent.glob(glob))
+            except OSError:
+                logger.exception("Failed to list Office cache items in: %s", parent)
+                continue
+            for item in items:
+                try:
+                    if item.is_dir():
+                        shutil.rmtree(item, ignore_errors=True)
+                    else:
+                        item.unlink(missing_ok=True)
+                    removed += 1
+                except Exception:
+                    logger.exception("Failed to remove Office cache item: %s", item)
+        logger.info("Office cache cleanup finished (items_removed=%s)", removed)
+    finally:
+        _release_cleanup_leader()
 
 
 # ---------------------------------------------------------------------------
