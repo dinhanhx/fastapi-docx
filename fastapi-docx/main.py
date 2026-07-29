@@ -157,4 +157,5 @@ if __name__ == "__main__":
         port=PORT,
         workers=WORKERS,
         reload=RELOAD,
+        log_level="debug",
     )
